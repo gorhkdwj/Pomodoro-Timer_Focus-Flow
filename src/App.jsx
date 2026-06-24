@@ -6,11 +6,16 @@ import Analytics from './pages/Analytics';
 import Navigation from './components/Navigation';
 import SettingsModal from './components/SettingsModal';
 import { useSettingsStore } from './store/settingsStore';
+import { useAuthStore } from './store/authStore';
 import { stopCurrentAlarm } from './utils/sound';
 import { isElectron } from './utils/fsHelper';
+import { resolveAssetValue } from './utils/cloudAssets';
+import { startSync, pullOnLogin } from './utils/syncManager';
 
 function App() {
   const { bgTheme, customThemes, designTheme } = useSettingsStore();
+  const initAuth = useAuthStore((s) => s.init);
+  const authStatus = useAuthStore((s) => s.status);
 
   const getThemeSrc = () => {
     let activeTheme = bgTheme;
@@ -31,28 +36,44 @@ function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   useEffect(() => {
-    let activeTheme = bgTheme;
-    if (activeTheme === 'mondayMorning') activeTheme = 'Wallpaper1';
+    initAuth();
+  }, [initAuth]);
 
-    if (activeTheme) {
-      const custom = customThemes?.find(t => t.id === activeTheme);
-      let bgUrl;
-      if (custom) {
-        bgUrl = custom.dataUrl;
-      } else if (isElectron()) {
-        bgUrl = `asset://backgrounds/${encodeURIComponent(activeTheme + '.jpg')}`;
-      }
-      if (!bgUrl) bgUrl = `${import.meta.env.BASE_URL}themes/${activeTheme}.jpg`;
-      document.body.style.backgroundImage = `url('${bgUrl}')`;
-      document.body.style.backgroundSize = 'cover';
-      document.body.style.backgroundPosition = 'center';
-      document.body.style.backgroundRepeat = 'no-repeat';
-      document.body.style.backgroundAttachment = 'fixed';
-      document.body.style.backgroundColor = 'transparent';
-    } else {
-      document.body.style.backgroundImage = 'none';
-      document.body.style.backgroundColor = 'var(--bg-primary)';
+  useEffect(() => {
+    if (authStatus === 'signedIn') {
+      startSync();
+      pullOnLogin();
     }
+  }, [authStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      let activeTheme = bgTheme;
+      if (activeTheme === 'mondayMorning') activeTheme = 'Wallpaper1';
+
+      if (activeTheme) {
+        const custom = customThemes?.find(t => t.id === activeTheme);
+        let bgUrl;
+        if (custom) {
+          bgUrl = await resolveAssetValue(custom.dataUrl);
+        } else if (isElectron()) {
+          bgUrl = `asset://backgrounds/${encodeURIComponent(activeTheme + '.jpg')}`;
+        }
+        if (!bgUrl) bgUrl = `${import.meta.env.BASE_URL}themes/${activeTheme}.jpg`;
+        if (cancelled) return;
+        document.body.style.backgroundImage = `url('${bgUrl}')`;
+        document.body.style.backgroundSize = 'cover';
+        document.body.style.backgroundPosition = 'center';
+        document.body.style.backgroundRepeat = 'no-repeat';
+        document.body.style.backgroundAttachment = 'fixed';
+        document.body.style.backgroundColor = 'transparent';
+      } else {
+        document.body.style.backgroundImage = 'none';
+        document.body.style.backgroundColor = 'var(--bg-primary)';
+      }
+    })();
+    return () => { cancelled = true; };
   }, [bgTheme, customThemes]);
 
   useEffect(() => {

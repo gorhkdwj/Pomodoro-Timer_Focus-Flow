@@ -1,15 +1,21 @@
 import React, { useState } from 'react';
 import { X, Save, Volume2, PlayCircle, Globe } from 'lucide-react';
 import { useSettingsStore } from '../store/settingsStore';
+import { useAuthStore } from '../store/authStore';
 import { getTranslation } from '../utils/i18n';
 import { playBeep } from '../utils/sound';
 import { saveAssetToLocal, deleteLocalAsset, isElectron } from '../utils/fsHelper';
+import { isSupabaseConfigured } from '../utils/supabaseClient';
+import { uploadAsset, deleteAsset, resolveAssetValue } from '../utils/cloudAssets';
+import AuthPanel from './AuthPanel';
 import './SettingsModal.css';
 
 export default function SettingsModal({ onClose }) {
   const settings = useSettingsStore();
   const t = (key) => getTranslation(settings.language, key);
-  
+  const authStatus = useAuthStore((s) => s.status);
+  const refreshUsage = useAuthStore((s) => s.refreshUsage);
+
   const [localFocus, setLocalFocus] = useState(settings.focusTime);
   const [localBreak, setLocalBreak] = useState(settings.breakTime);
   const [localLongBreak, setLocalLongBreak] = useState(settings.longBreakTime);
@@ -55,28 +61,55 @@ export default function SettingsModal({ onClose }) {
     const file = e.target.files[0];
     if (!file) return;
 
+    const useCloud = isSupabaseConfigured && authStatus === 'signedIn';
+
     try {
-      const fileUrl = await saveAssetToLocal(file, type);
-      if (!fileUrl) {
-        alert("Failed to save asset. Run in Electron.");
-        return;
-      }
-      
-      const id = 'custom_' + Date.now();
-      
-      if (type === 'theme') {
-        settings.addCustomTheme({ id, name: file.name, dataUrl: fileUrl });
-        setLocalBgTheme(id);
-      } else if (type === 'focus') {
-        settings.addCustomSound({ id, name: file.name, dataUrl: fileUrl });
-        setLocalFocusSound(fileUrl);
-      } else if (type === 'break') {
-        settings.addCustomSound({ id, name: file.name, dataUrl: fileUrl });
-        setLocalBreakSound(fileUrl);
+      if (useCloud) {
+        let result;
+        try {
+          result = await uploadAsset(file, type); // 'theme' | 'focus' | 'break'
+        } catch (err) {
+          if (err.message === 'FILE_TOO_LARGE') alert(t('errFileTooLarge'));
+          else if (err.message === 'QUOTA_EXCEEDED') alert(t('errQuotaExceeded'));
+          else { console.error(err); alert(t('errQuotaExceeded')); }
+          e.target.value = '';
+          return;
+        }
+        const { clientId, name, storagePath } = result;
+        if (type === 'theme') {
+          // Themes store the raw storage path; resolved to a signed URL at render time.
+          settings.addCustomTheme({ id: clientId, name, dataUrl: storagePath });
+          setLocalBgTheme(clientId);
+        } else {
+          // Sounds store a stable virtual scheme so the <select> value never expires.
+          const stable = `asset-id:${clientId}`;
+          settings.addCustomSound({ id: clientId, name, dataUrl: stable });
+          if (type === 'focus') setLocalFocusSound(stable);
+          else setLocalBreakSound(stable);
+        }
+        refreshUsage();
+      } else {
+        const fileUrl = await saveAssetToLocal(file, type);
+        if (!fileUrl) {
+          alert("Failed to save asset. Run in Electron.");
+          e.target.value = '';
+          return;
+        }
+        const id = 'custom_' + Date.now();
+        if (type === 'theme') {
+          settings.addCustomTheme({ id, name: file.name, dataUrl: fileUrl });
+          setLocalBgTheme(id);
+        } else if (type === 'focus') {
+          settings.addCustomSound({ id, name: file.name, dataUrl: fileUrl });
+          setLocalFocusSound(fileUrl);
+        } else if (type === 'break') {
+          settings.addCustomSound({ id, name: file.name, dataUrl: fileUrl });
+          setLocalBreakSound(fileUrl);
+        }
       }
     } catch (err) {
       console.error(err);
-      alert("Error saving file locally.");
+      alert("Error saving file.");
     }
 
     e.target.value = ''; // reset input
@@ -84,28 +117,33 @@ export default function SettingsModal({ onClose }) {
 
   React.useEffect(() => {
     // Live background preview while settings modal is open
-    let activeTheme = localBgTheme;
-    if (activeTheme === 'mondayMorning') activeTheme = 'Wallpaper1';
+    let cancelled = false;
+    (async () => {
+      let activeTheme = localBgTheme;
+      if (activeTheme === 'mondayMorning') activeTheme = 'Wallpaper1';
 
-    if (activeTheme && activeTheme !== 'none') {
-      const custom = settings.customThemes?.find(t => t.id === activeTheme);
-      let bgUrl;
-      if (custom) {
-        bgUrl = custom.dataUrl;
-      } else if (isElectron()) {
-        bgUrl = `asset://backgrounds/${encodeURIComponent(activeTheme + '.jpg')}`;
+      if (activeTheme && activeTheme !== 'none') {
+        const custom = settings.customThemes?.find(t => t.id === activeTheme);
+        let bgUrl;
+        if (custom) {
+          bgUrl = await resolveAssetValue(custom.dataUrl);
+        } else if (isElectron()) {
+          bgUrl = `asset://backgrounds/${encodeURIComponent(activeTheme + '.jpg')}`;
+        }
+        if (!bgUrl) bgUrl = `${import.meta.env.BASE_URL}themes/${activeTheme}.jpg`;
+        if (cancelled) return;
+        document.body.style.backgroundImage = `url('${bgUrl}')`;
+        document.body.style.backgroundSize = 'cover';
+        document.body.style.backgroundPosition = 'center';
+        document.body.style.backgroundRepeat = 'no-repeat';
+        document.body.style.backgroundAttachment = 'fixed';
+        document.body.style.backgroundColor = 'transparent';
+      } else {
+        document.body.style.backgroundImage = 'none';
+        document.body.style.backgroundColor = 'var(--bg-primary)';
       }
-      if (!bgUrl) bgUrl = `${import.meta.env.BASE_URL}themes/${activeTheme}.jpg`;
-      document.body.style.backgroundImage = `url('${bgUrl}')`;
-      document.body.style.backgroundSize = 'cover';
-      document.body.style.backgroundPosition = 'center';
-      document.body.style.backgroundRepeat = 'no-repeat';
-      document.body.style.backgroundAttachment = 'fixed';
-      document.body.style.backgroundColor = 'transparent';
-    } else {
-      document.body.style.backgroundImage = 'none';
-      document.body.style.backgroundColor = 'var(--bg-primary)';
-    }
+    })();
+    return () => { cancelled = true; };
   }, [localBgTheme, settings.customThemes]);
 
   React.useEffect(() => {
@@ -153,7 +191,7 @@ export default function SettingsModal({ onClose }) {
     onClose();
   };
 
-  const previewSound = (soundType) => {
+  const previewSound = async (soundType) => {
     if (activeAudioCleanup.current) {
       activeAudioCleanup.current();
       activeAudioCleanup.current = null;
@@ -167,7 +205,8 @@ export default function SettingsModal({ onClose }) {
       setPlayingPreview(soundType);
       setLastPreviewedSound(soundType);
       const volToUse = soundType === localFocusSound ? localFocusVolume : localBreakVolume;
-      const stopSound = playBeep(soundType, volToUse);
+      const resolved = await resolveAssetValue(soundType);
+      const stopSound = playBeep(resolved, volToUse);
       activeAudioCleanup.current = stopSound;
       
       // Auto-reset button state after a generous amount of time if we can't reliably track 'ended' event for oscillators 
@@ -186,12 +225,13 @@ export default function SettingsModal({ onClose }) {
     setLocalBreakVolume(parseFloat(e.target.value));
   };
   
-  const handleFocusVolumeRelease = () => {
+  const handleFocusVolumeRelease = async () => {
     if (activeAudioCleanup.current) {
       activeAudioCleanup.current();
     }
-    
-    const stopSound = playBeep(localFocusSound, localFocusVolume);
+
+    const resolved = await resolveAssetValue(localFocusSound);
+    const stopSound = playBeep(resolved, localFocusVolume);
     activeAudioCleanup.current = stopSound;
     setPlayingPreview(localFocusSound);
     setLastPreviewedSound(localFocusSound);
@@ -200,12 +240,13 @@ export default function SettingsModal({ onClose }) {
     }, 1000);
   };
 
-  const handleBreakVolumeRelease = () => {
+  const handleBreakVolumeRelease = async () => {
     if (activeAudioCleanup.current) {
       activeAudioCleanup.current();
     }
-    
-    const stopSound = playBeep(localBreakSound, localBreakVolume);
+
+    const resolved = await resolveAssetValue(localBreakSound);
+    const stopSound = playBeep(resolved, localBreakVolume);
     activeAudioCleanup.current = stopSound;
     setPlayingPreview(localBreakSound);
     setLastPreviewedSound(localBreakSound);
@@ -247,6 +288,7 @@ export default function SettingsModal({ onClose }) {
         </div>
 
         <div className="modal-body">
+          <AuthPanel lang={localLanguage} />
           <section className="settings-section">
             <h4><Globe size={18} style={{ marginRight: '8px', verticalAlign: 'middle' }} />{t('display')}</h4>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
@@ -293,11 +335,19 @@ export default function SettingsModal({ onClose }) {
                 ))}
               </select>
               {localBgTheme.startsWith('custom_') && (
-                <button 
-                  className="delete-custom-btn" 
-                  onClick={() => {
+                <button
+                  className="delete-custom-btn"
+                  onClick={async () => {
                     const theme = settings.customThemes?.find(t => t.id === localBgTheme);
-                    if (theme) deleteLocalAsset(theme.dataUrl);
+                    if (theme) {
+                      const isCloud = !theme.dataUrl?.startsWith('asset://') && !theme.dataUrl?.startsWith('blob:');
+                      if (isSupabaseConfigured && authStatus === 'signedIn' && isCloud) {
+                        await deleteAsset(localBgTheme);
+                        refreshUsage();
+                      } else {
+                        deleteLocalAsset(theme.dataUrl);
+                      }
+                    }
                     settings.removeCustomTheme(localBgTheme);
                     setLocalBgTheme('mondayMorning');
                   }}
@@ -418,13 +468,18 @@ export default function SettingsModal({ onClose }) {
                       <option key={s.id} value={s.dataUrl}>{s.name} (Custom)</option>
                     ))}
                   </select>
-                  {localFocusSound.startsWith('asset://') || localFocusSound.startsWith('file://') || localFocusSound.startsWith('data:audio') || localFocusSound.startsWith('blob:') ? (
-                    <button 
-                      className="delete-custom-btn" 
-                      onClick={() => {
+                  {localFocusSound.startsWith('asset://') || localFocusSound.startsWith('file://') || localFocusSound.startsWith('data:audio') || localFocusSound.startsWith('blob:') || localFocusSound.startsWith('asset-id:') ? (
+                    <button
+                      className="delete-custom-btn"
+                      onClick={async () => {
                         const soundDetails = settings.customSounds.find(s => s.dataUrl === localFocusSound);
                         if (soundDetails) {
-                          deleteLocalAsset(soundDetails.dataUrl);
+                          if (soundDetails.dataUrl.startsWith('asset-id:')) {
+                            await deleteAsset(soundDetails.id);
+                            refreshUsage();
+                          } else {
+                            deleteLocalAsset(soundDetails.dataUrl);
+                          }
                           settings.removeCustomSound(soundDetails.id);
                         }
                         setLocalFocusSound('City_Lights_Recharge.mp3');
@@ -480,13 +535,18 @@ export default function SettingsModal({ onClose }) {
                       <option key={s.id} value={s.dataUrl}>{s.name} (Custom)</option>
                     ))}
                   </select>
-                  {localBreakSound.startsWith('asset://') || localBreakSound.startsWith('file://') || localBreakSound.startsWith('data:audio') || localBreakSound.startsWith('blob:') ? (
-                    <button 
-                      className="delete-custom-btn" 
-                      onClick={() => {
+                  {localBreakSound.startsWith('asset://') || localBreakSound.startsWith('file://') || localBreakSound.startsWith('data:audio') || localBreakSound.startsWith('blob:') || localBreakSound.startsWith('asset-id:') ? (
+                    <button
+                      className="delete-custom-btn"
+                      onClick={async () => {
                         const soundDetails = settings.customSounds.find(s => s.dataUrl === localBreakSound);
                         if (soundDetails) {
-                          deleteLocalAsset(soundDetails.dataUrl);
+                          if (soundDetails.dataUrl.startsWith('asset-id:')) {
+                            await deleteAsset(soundDetails.id);
+                            refreshUsage();
+                          } else {
+                            deleteLocalAsset(soundDetails.dataUrl);
+                          }
                           settings.removeCustomSound(soundDetails.id);
                         }
                         setLocalBreakSound('bell');

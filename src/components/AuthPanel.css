@@ -1,0 +1,129 @@
+.auth-panel .auth-hint {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-form input {
+  width: 100%;
+}
+
+.auth-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: opacity 0.2s, background 0.2s;
+}
+
+.auth-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.auth-btn.primary {
+  background: var(--accent-focus, #6366f1);
+  color: #fff;
+  margin-top: 4px;
+}
+
+.auth-btn.google {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  width: 100%;
+  margin-top: 8px;
+}
+
+.auth-btn.ghost {
+  background: transparent;
+  border: 1px solid var(--text-secondary);
+  color: var(--text-primary);
+  padding: 6px 12px;
+}
+
+.auth-toggle {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  cursor: pointer;
+  margin-top: 10px;
+  text-decoration: underline;
+  width: 100%;
+}
+
+.auth-error {
+  color: #ef4444;
+  font-size: 0.82rem;
+}
+
+.auth-notice {
+  color: var(--accent-break, #10b981);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.auth-signed-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.auth-userinfo {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.auth-label {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.auth-email {
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.auth-usage {
+  margin-top: 14px;
+}
+
+.auth-usage-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.auth-usage-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+.auth-usage-fill {
+  height: 100%;
+  background: var(--accent-focus, #6366f1);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}

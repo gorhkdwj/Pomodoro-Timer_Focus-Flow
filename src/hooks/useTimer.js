@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSettingsStore } from '../store/settingsStore';
 import { useLogStore } from '../store/logStore';
 import { playBeep } from '../utils/sound';
+import { resolveAssetValue } from '../utils/cloudAssets';
 
 export function useTimer() {
   const { focusTime, breakTime, longBreakTime, longBreakInterval, autoStartBreaks, autoStartPoms, focusSound, breakSound, focusVolume, breakVolume } = useSettingsStore();
@@ -51,7 +52,10 @@ export function useTimer() {
       nextPhase = 'focus';
     }
 
-    playBeep(nextPhase === 'focus' ? focusSound : breakSound, nextPhase === 'focus' ? focusVolume : breakVolume);
+    // Resolve cloud values (asset-id:/https) to a playable URL without blocking the phase transition.
+    const soundToPlay = nextPhase === 'focus' ? focusSound : breakSound;
+    const volToPlay = nextPhase === 'focus' ? focusVolume : breakVolume;
+    resolveAssetValue(soundToPlay).then((resolved) => playBeep(resolved, volToPlay));
     
     // Log the session
     const durationMins = phase === 'focus' ? focusTime : (phase === 'longBreak' ? longBreakTime : breakTime);
